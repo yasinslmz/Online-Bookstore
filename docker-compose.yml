@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # SQL Server Database
+  database:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: bookshop-database
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=BookshopPassword123!
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+      - ./KTDB.sql:/docker-entrypoint-initdb.d/KTDB.sql
+    networks:
+      - bookshop-network
+    restart: unless-stopped
+
+  # ASP.NET Core Web API
+  api:
+    build:
+      context: ./BookshopApi/ProductManagementWebApi
+      dockerfile: Dockerfile
+    container_name: bookshop-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Server=database;Database=KTStore;User Id=sa;Password=BookshopPassword123!;TrustServerCertificate=true;
+      - Jwt__SecretKey=BookshopSuperSecretJWTKeyForDevelopmentOnly2024!
+      - Jwt__Issuer=BookshopAPI
+      - Jwt__Audience=BookshopClient
+      - Jwt__ExpirationHours=24
+      - Cors__AllowedOrigins__0=http://localhost:3000
+      - Cors__AllowedOrigins__1=http://frontend:3000
+    ports:
+      - "7247:80"
+    depends_on:
+      - database
+    networks:
+      - bookshop-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./bookshop/bookshop
+      dockerfile: Dockerfile
+    container_name: bookshop-frontend
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:7247/api
+      - REACT_APP_APP_NAME=Bookshop
+      - REACT_APP_VERSION=1.0.0
+      - REACT_APP_ENV=development
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - bookshop-network
+    restart: unless-stopped
+
+networks:
+  bookshop-network:
+    driver: bridge
+
+volumes:
+  sqldata:
+    driver: local
+
+# Alternative configuration for production
+---
+# Production Docker Compose (docker-compose.prod.yml)
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+version: '3.8'
+
+services:
+  database:
+    environment:
+      - SA_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - sqldata_prod:/var/opt/mssql
+
+  api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=https://+:443;http://+:80
+      - ConnectionStrings__DefaultConnection=${CONNECTION_STRING}
+      - Jwt__SecretKey=${JWT_SECRET_KEY}
+      - Cors__AllowedOrigins__0=${FRONTEND_URL}
+    ports:
+      - "443:443"
+      - "80:80"
+
+  frontend:
+    environment:
+      - REACT_APP_API_BASE_URL=${API_URL}
+      - REACT_APP_ENV=production
+
+volumes:
+  sqldata_prod:
+    driver: local 
